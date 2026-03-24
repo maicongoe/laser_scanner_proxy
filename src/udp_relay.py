@@ -7,8 +7,10 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+from nanoscan_parser import NanoScanUdpInterpreter
 from models import AppConfig, ScannerConfig
 from stats import StatsRegistry
+from telemetry_store import TelemetryStore
 from utils import format_bytes_per_second, format_duration
 
 
@@ -16,6 +18,7 @@ from utils import format_bytes_per_second, format_duration
 class ScannerRuntime:
     config: ScannerConfig
     sender_socket: socket.socket
+    interpreter: Optional[NanoScanUdpInterpreter]
 
 
 @dataclass(frozen=True)
@@ -55,9 +58,15 @@ class PortRoute:
 
 
 class UdpRelay:
-    def __init__(self, config: AppConfig, logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        logger: logging.Logger,
+        telemetry_store: Optional[TelemetryStore] = None,
+    ) -> None:
         self._config = config
         self._logger = logger
+        self._telemetry_store = telemetry_store
         self._selector = selectors.DefaultSelector()
         self._running = False
 
@@ -66,6 +75,7 @@ class UdpRelay:
         self._recv_buffers: dict[socket.socket, bytearray] = {}
         self._recv_views: dict[socket.socket, memoryview] = {}
         self._routes_by_socket: dict[socket.socket, PortRoute] = {}
+        self._telemetry_packet_counters: dict[str, int] = {}
 
         enabled_names = [scanner.name for scanner in self._config.enabled_scanners]
         self._stats = StatsRegistry(enabled_names)
@@ -130,7 +140,19 @@ class UdpRelay:
             sender.setblocking(False)
             sender.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, general.send_socket_buffer_bytes)
             self._sender_sockets.append(sender)
-            runtimes.append(ScannerRuntime(config=scanner, sender_socket=sender))
+            interpreter = None
+            if self._telemetry_store is not None and self._config.web.enabled:
+                interpreter = NanoScanUdpInterpreter(
+                    max_sample_points=self._config.web.max_sample_points
+                )
+            runtimes.append(
+                ScannerRuntime(
+                    config=scanner,
+                    sender_socket=sender,
+                    interpreter=interpreter,
+                )
+            )
+            self._telemetry_packet_counters[scanner.name] = 0
 
         routes_by_port: dict[int, list[ScannerRuntime]] = {}
         for runtime in runtimes:
@@ -275,6 +297,43 @@ class UdpRelay:
                 continue
 
             self._stats.mark_forwarded(scanner_name, packet_size)
+
+        self._process_telemetry(runtime, payload, now)
+
+    def _process_telemetry(
+        self,
+        runtime: ScannerRuntime,
+        payload: memoryview,
+        now_monotonic: float,
+    ) -> None:
+        if runtime.interpreter is None:
+            return
+        if self._telemetry_store is None:
+            return
+
+        scanner_name = runtime.config.name
+        self._telemetry_packet_counters[scanner_name] += 1
+        parse_enabled = (
+            self._telemetry_packet_counters[scanner_name]
+            % self._config.web.parse_every_n_packets
+            == 0
+        )
+        try:
+            snapshot = runtime.interpreter.feed_datagram(
+                payload,
+                now_monotonic,
+                parse_enabled=parse_enabled,
+            )
+            if snapshot is not None:
+                self._telemetry_store.update_snapshot(scanner_name, snapshot)
+        except Exception as exc:
+            self._telemetry_store.mark_parse_error(scanner_name, str(exc))
+            if self._config.general.debug:
+                self._logger.debug(
+                    "Falha ao interpretar pacote nanoScan3 do scanner '%s': %s",
+                    scanner_name,
+                    exc,
+                )
 
     def _emit_stats(self, now: float) -> None:
         reports = self._stats.build_reports(

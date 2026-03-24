@@ -1,40 +1,25 @@
-# UDP Relay/Fan-out para Laser Scanners Industriais (Python 3.10+)
+﻿# UDP Relay/Fan-out + Interpretacao nanoScan3 (Python 3.10+)
 
-Relay UDP leve para Linux, pensado para AMR industrial: recebe pacotes de até 4 scanners e replica rapidamente para 1 ou mais destinos por scanner, com baixo overhead e baixo jitter.
+Projeto para Linux com foco em operacao industrial:
 
-## Objetivo do relay
+- relay UDP de 1 a 4 scanners
+- fan-out para um ou mais destinos por scanner
+- interpretacao dos telegramas UDP do SICK nanoScan3
+- servidor web leve para visualizar os dados interpretados
 
-Duplicar/replicar pacotes UDP de scanners sem parsing pesado e sem impacto perceptível no software de navegação.
+## O que foi adicionado nesta versao
 
-Fluxo crítico:
+- parser UDP do nanoScan3 em `src/nanoscan_parser.py`
+- store thread-safe de telemetria em `src/telemetry_store.py`
+- servidor web HTTP (API + pagina) em `src/web_server.py`
+- integracao no loop do relay para interpretar sem parar o encaminhamento UDP
 
-1. receber pacote UDP
-2. validar mínimo (porta/IP/tamanho)
-3. reenviar payload sem modificar
-4. atualizar contadores
+Implementacao baseada na estrutura de parsing dos repositorios oficiais da SICK:
 
-## Quando usar essa abordagem
+- https://github.com/SICKAG/sick_safetyscanners_base
+- https://github.com/SICKAG/sick_safetyscanners2
 
-Use quando:
-
-- o scanner envia UDP contínuo (ex.: 30 Hz);
-- você precisa copiar dados para outro consumidor (CLP, logger, gateway, etc.);
-- quer manter solução simples, previsível e fácil de manter.
-
-Caso clássico (scanner com **um único destino**):
-
-- scanner envia para IP/porta do relay;
-- relay faz fan-out para navegação e CLP.
-
-## Limitações
-
-- UDP não garante entrega.
-- Não há retransmissão/ACK.
-- Não há parsing de protocolo no caminho crítico.
-- Não há banco de dados.
-- Não há interface gráfica.
-
-## Estrutura do projeto
+## Estrutura
 
 ```text
 .
@@ -49,71 +34,55 @@ Caso clássico (scanner com **um único destino**):
 │   ├── logger_setup.py
 │   ├── main.py
 │   ├── models.py
+│   ├── nanoscan_parser.py
 │   ├── stats.py
+│   ├── telemetry_store.py
 │   ├── udp_relay.py
-│   └── utils.py
+│   ├── utils.py
+│   └── web_server.py
 └── systemd
     └── udp-relay.service
 ```
 
-## Dependências
+## Dependencias
 
-Somente biblioteca padrão do Python 3.10+.
+Somente biblioteca padrao do Python 3.10+.
 
-`requirements.txt`:
+## Configuracao JSON
 
-```txt
-# Projeto usando apenas biblioteca padrão do Python 3.10+.
-# Nenhuma dependência externa é necessária.
-```
+### Secao `general`
 
-## Configuração (`JSON`)
+- `log_level`
+- `debug`
+- `stats_interval_sec`
+- `recv_socket_buffer_bytes`
+- `send_socket_buffer_bytes`
+- `max_expected_packet_size`
+- `source_ip_filter_enabled`
+- `cpu_affinity`
+- `nice`
+- `scanner_timeout_sec`
+- `max_packets_per_socket_event`
 
-Arquivo contém:
+### Nova secao `web`
 
-- `general`: parâmetros globais;
-- `scanners`: lista de 1 a 4 scanners.
+- `enabled`: habilita API/web
+- `host`: ex. `0.0.0.0`
+- `port`: ex. `8080`
+- `max_sample_points`: limita pontos enviados na API (reduz CPU/rede)
+- `parse_every_n_packets`: interpreta 1 a cada N pacotes (reduz CPU)
 
-Cada scanner usa:
+### Secao `scanners`
+
+Cada scanner:
 
 - `name`
 - `enabled`
-- `source_ip` (opcional, recomendado)
-- `local_port` (porta de recepção do relay)
-- `destinations` (lista de destinos fan-out, cada destino tem `ip` e `port`)
+- `source_ip` (opcional)
+- `local_port`
+- `destinations`: lista de `{ "ip", "port" }`
 
-Também há compatibilidade com formato legado:
-
-- `destination_ip` + `destination_port` (um único destino)
-
-### Regras de validação
-
-- 1 a 4 scanners no arquivo.
-- Pelo menos 1 scanner habilitado.
-- Nome de scanner único.
-- IPs e portas válidos.
-- Scanners desabilitados são ignorados.
-- Com `source_ip_filter_enabled=false`, não pode haver múltiplos scanners na mesma `local_port`.
-- Com `source_ip_filter_enabled=true`, múltiplos scanners na mesma `local_port` exigem `source_ip` único por scanner.
-
-## Exemplo completo para 1 scanner (scanner só envia para um IP/porta)
-
-Cenário:
-
-- scanner: `192.168.10.101`
-- Linux AMR (relay + navegação): `192.168.10.10`
-- navegação escuta em `21100`
-- scanner envia para relay em `21110`
-- CLP: `192.168.20.50:25000`
-
-No scanner:
-
-- destino único = `192.168.10.10:21110` (relay)
-
-No relay:
-
-- recebe em `21110`
-- reenvia para `192.168.10.10:21100` (navegação) e `192.168.20.50:25000` (CLP)
+## Exemplo de config (1 scanner)
 
 ```json
 {
@@ -129,6 +98,13 @@ No relay:
     "nice": 5,
     "scanner_timeout_sec": 2.0,
     "max_packets_per_socket_event": 128
+  },
+  "web": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8080,
+    "max_sample_points": 120,
+    "parse_every_n_packets": 3
   },
   "scanners": [
     {
@@ -145,155 +121,62 @@ No relay:
 }
 ```
 
-## Exemplos adicionais
+## Execucao
 
-### Exemplo 2 scanners
-
-```json
-{
-  "general": {
-    "log_level": "INFO",
-    "debug": false,
-    "stats_interval_sec": 5.0,
-    "recv_socket_buffer_bytes": 1048576,
-    "send_socket_buffer_bytes": 262144,
-    "max_expected_packet_size": 4096,
-    "source_ip_filter_enabled": true,
-    "cpu_affinity": null,
-    "nice": 5,
-    "scanner_timeout_sec": 2.0,
-    "max_packets_per_socket_event": 128
-  },
-  "scanners": [
-    {
-      "name": "front_lidar",
-      "enabled": true,
-      "source_ip": "192.168.10.101",
-      "local_port": 21110,
-      "destinations": [
-        { "ip": "192.168.10.10", "port": 21100 },
-        { "ip": "192.168.20.50", "port": 25000 }
-      ]
-    },
-    {
-      "name": "rear_lidar",
-      "enabled": true,
-      "source_ip": "192.168.10.102",
-      "local_port": 21111,
-      "destinations": [
-        { "ip": "192.168.10.10", "port": 21101 },
-        { "ip": "192.168.20.50", "port": 25001 }
-      ]
-    }
-  ]
-}
-```
-
-### Exemplo 4 scanners (2 scanners na mesma porta local)
-
-```json
-{
-  "general": {
-    "log_level": "INFO",
-    "debug": false,
-    "stats_interval_sec": 5.0,
-    "recv_socket_buffer_bytes": 1048576,
-    "send_socket_buffer_bytes": 262144,
-    "max_expected_packet_size": 4096,
-    "source_ip_filter_enabled": true,
-    "cpu_affinity": [2],
-    "nice": 5,
-    "scanner_timeout_sec": 2.0,
-    "max_packets_per_socket_event": 128
-  },
-  "scanners": [
-    {
-      "name": "front_lidar",
-      "enabled": true,
-      "source_ip": "192.168.10.101",
-      "local_port": 21110,
-      "destinations": [
-        { "ip": "192.168.10.10", "port": 21100 },
-        { "ip": "192.168.20.50", "port": 25000 }
-      ]
-    },
-    {
-      "name": "rear_lidar",
-      "enabled": true,
-      "source_ip": "192.168.10.102",
-      "local_port": 21110,
-      "destinations": [
-        { "ip": "192.168.10.10", "port": 21101 },
-        { "ip": "192.168.20.50", "port": 25001 }
-      ]
-    },
-    {
-      "name": "left_lidar",
-      "enabled": true,
-      "source_ip": "192.168.10.103",
-      "local_port": 21112,
-      "destinations": [
-        { "ip": "192.168.10.10", "port": 21102 },
-        { "ip": "192.168.20.50", "port": 25002 }
-      ]
-    },
-    {
-      "name": "right_lidar",
-      "enabled": true,
-      "source_ip": "192.168.10.104",
-      "local_port": 21113,
-      "destinations": [
-        { "ip": "192.168.10.10", "port": 21103 },
-        { "ip": "192.168.20.50", "port": 25003 }
-      ]
-    }
-  ]
-}
-```
-
-## Instalação e execução
-
-### Execução manual
-
-```bash
-python3 src/main.py --config config/relay_config.example.json
-```
-
-Validação de configuração:
+Validar config:
 
 ```bash
 python3 src/main.py --config config/relay_config.example.json --validate-config
 ```
 
-### Como validar que está funcionando
+Rodar:
 
-- scanner transmitindo para `local_port` do relay;
-- `recebido` subindo no scanner correto;
-- `reenviado` subindo (agora conta cada cópia enviada para cada destino);
-- `status=OK` para scanner ativo;
-- navegação e CLP recebendo dados.
+```bash
+python3 src/main.py --config config/relay_config.example.json
+```
 
-## Saída periódica de estatísticas
+## Servidor web
 
-Por scanner:
+Com `web.enabled=true`, o processo sobe HTTP com:
 
-- `recebido`
-- `reenviado`
-- `descartado`
-- `erros`
-- `pps`
-- `throughput`
-- `sem_dados`
-- `status` (`OK` / `TIMEOUT`)
+- `GET /` -> pagina HTML de monitoramento
+- `GET /health` -> health check
+- `GET /api/scanners` -> estado de todos scanners
+- `GET /api/scanners/<nome>` -> estado de um scanner
 
-Observação:
+Exemplo:
 
-- com múltiplos destinos no mesmo scanner, `reenviado` representa cópias bem-sucedidas.
+```bash
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/api/scanners
+```
 
-## Teste local com simulador
+## O que a interpretacao mostra
 
-1. Inicie relay com um config local.
-2. Rode:
+Por scanner (quando telegrama completo do nanoScan3 e parse valido):
+
+- `sequence_number`, `scan_number`, `channel_number`
+- `number_of_beams`
+- `start_angle_deg`, `angular_beam_resolution_deg`
+- `scan_time_ms`, `interbeam_period_us`
+- contadores de status (`valid`, `infinite`, `glare`, `reflector`, `contamination`)
+- `min_range_m`, `max_range_m`
+- amostragem de pontos (`sample_angles_deg`, `sample_ranges_m`, `sample_reflectivity`)
+
+## Performance e robustez
+
+- caminho de relay continua enxuto: receber -> reenviar -> contadores
+- interpretacao roda no mesmo processo, mas isolada por tratamento de excecao
+- erro de parse nao derruba relay
+- servidor web roda em thread separada para nao bloquear o loop UDP
+- logs continuam em stdout/stderr
+
+Se o uso de CPU subir com web habilitada:
+
+- aumente `web.parse_every_n_packets` (ex.: 3, 5, 10)
+- reduza `web.max_sample_points` (ex.: 60 ou 90)
+
+## Teste com simulador (somente relay)
 
 ```bash
 python3 scripts/udp_scanner_simulator.py \
@@ -304,86 +187,20 @@ python3 scripts/udp_scanner_simulator.py \
   --duration-sec 10
 ```
 
-3. Veja no log do relay o crescimento de `recebido/reenviado`.
+Observacao: o simulador nao gera telegrama real do nanoScan3, entao a parte de interpretacao pode nao preencher campos reais.
 
-## Systemd
+## systemd
 
-Arquivo: `systemd/udp-relay.service`.
+Use `systemd/udp-relay.service` como base e ajuste:
 
-Instalação:
-
-```bash
-sudo cp systemd/udp-relay.service /etc/systemd/system/udp-relay.service
-sudo systemctl daemon-reload
-sudo systemctl enable udp-relay.service
-sudo systemctl start udp-relay.service
-sudo systemctl status udp-relay.service
-journalctl -u udp-relay.service -f
-```
-
-Ajustar no service:
-
-- `User` e `Group`
+- `User` / `Group`
 - `WorkingDirectory`
-- `ExecStart`
+- `ExecStart` com `--config`
 
-## Decisões de arquitetura e performance
+## Possiveis melhorias futuras
 
-Por que `selectors` + UDP não bloqueante:
-
-- um loop único, sem threads no caminho crítico;
-- menor jitter por evitar contenção de thread/scheduler;
-- previsível e simples de manter.
-
-Otimizações que realmente importam:
-
-- não logar por pacote em produção;
-- `recvfrom_into` com buffer reutilizado;
-- caminho crítico mínimo;
-- tratamento de bursts por `max_packets_per_socket_event`;
-- relógio monotônico para watchdog e pps;
-- tratamento de exceção por scanner/porta sem derrubar processo.
-
-O que é exagero para este caso:
-
-- parsing pesado do payload no relay;
-- banco/mensageria no caminho crítico;
-- arquitetura complexa sem necessidade.
-
-## Recomendações práticas de operação
-
-- rodar separado do software de navegação (processo distinto);
-- manter `debug=false` em produção;
-- evitar processamento pesado no relay;
-- monitorar `descartado`, `erros` e `TIMEOUT`;
-- usar afinidade de CPU apenas quando medição justificar;
-- não transformar o relay em parser complexo.
-
-## `taskset`, `nice` e `chrt` (com cautela)
-
-```bash
-taskset -c 2 python3 src/main.py --config /etc/udp-relay/relay_config.json
-nice -n 5 python3 src/main.py --config /etc/udp-relay/relay_config.json
-sudo chrt -r 20 python3 src/main.py --config /etc/udp-relay/relay_config.json
-```
-
-Use `chrt` só após testes de carga; prioridade real-time mal aplicada pode afetar a navegação.
-
-## Compatibilidade com containerização futura
-
-- sem GUI;
-- sem serviços externos;
-- logs em stdout/stderr;
-- configuração por argumento `--config`;
-- estrutura simples para futuro Dockerfile.
-
-Docker não foi implementado nesta etapa.
-
-## Possíveis melhorias futuras
-
-- exportar métricas para Prometheus;
-- saída opcional para CSV;
-- socket tuning adicional;
-- modo de health check;
-- suporte opcional a multicast;
-- empacotamento `.deb`/`.rpm`.
+- exportar metricas em Prometheus
+- historico em CSV opcional
+- endpoint de health detalhado
+- tuning adicional de socket
+- suporte multicast opcional

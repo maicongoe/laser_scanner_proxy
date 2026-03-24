@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from models import AppConfig, ForwardTarget, GeneralConfig, ScannerConfig
+from models import AppConfig, ForwardTarget, GeneralConfig, ScannerConfig, WebConfig
 from utils import validate_ipv4, validate_port
 
 
@@ -31,6 +31,15 @@ SCANNER_REQUIRED_KEYS = {"name", "enabled", "local_port"}
 SCANNER_OPTIONAL_KEYS = {"source_ip", "destinations", "destination_ip", "destination_port"}
 SCANNER_ALLOWED_KEYS = SCANNER_REQUIRED_KEYS | SCANNER_OPTIONAL_KEYS
 
+WEB_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "host": "0.0.0.0",
+    "port": 8080,
+    "max_sample_points": 120,
+    "parse_every_n_packets": 1,
+}
+WEB_ALLOWED_KEYS = set(WEB_DEFAULTS.keys())
+
 
 def load_config(config_path: str) -> AppConfig:
     path = Path(config_path)
@@ -44,15 +53,22 @@ def load_config(config_path: str) -> AppConfig:
 
     if not isinstance(raw, dict):
         raise ConfigError("Configuracao raiz deve ser um objeto JSON.")
+    unknown_root = set(raw.keys()) - {"general", "scanners", "web"}
+    if unknown_root:
+        raise ConfigError(
+            f"Campos desconhecidos na raiz da configuracao: {', '.join(sorted(unknown_root))}"
+        )
 
     general_raw = raw.get("general", {})
     scanners_raw = raw.get("scanners")
+    web_raw = raw.get("web", {})
 
     general = _parse_general(general_raw)
     scanners = _parse_scanners(scanners_raw)
+    web = _parse_web(web_raw)
     _validate_scanner_relationships(scanners, general.source_ip_filter_enabled)
 
-    return AppConfig(general=general, scanners=scanners)
+    return AppConfig(general=general, scanners=scanners, web=web)
 
 
 def _parse_general(raw: Any) -> GeneralConfig:
@@ -262,6 +278,43 @@ def _ensure_float(value: Any, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"Campo '{field_name}' deve ser numerico.")
     return float(value)
+
+
+def _parse_web(raw: Any) -> WebConfig:
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ConfigError("'web' deve ser um objeto JSON.")
+
+    unknown_keys = set(raw.keys()) - WEB_ALLOWED_KEYS
+    if unknown_keys:
+        raise ConfigError(f"Campos desconhecidos em 'web': {', '.join(sorted(unknown_keys))}")
+
+    merged = dict(WEB_DEFAULTS)
+    merged.update(raw)
+
+    enabled = _ensure_bool(merged["enabled"], "web.enabled")
+    host = _ensure_str(merged["host"], "web.host")
+    if not host:
+        raise ConfigError("web.host nao pode ser vazio.")
+    port = validate_port(merged["port"], "web.port")
+    max_sample_points = _ensure_int(merged["max_sample_points"], "web.max_sample_points")
+    parse_every_n_packets = _ensure_int(
+        merged["parse_every_n_packets"],
+        "web.parse_every_n_packets",
+    )
+    if max_sample_points <= 0:
+        raise ConfigError("web.max_sample_points deve ser > 0.")
+    if parse_every_n_packets <= 0:
+        raise ConfigError("web.parse_every_n_packets deve ser > 0.")
+
+    return WebConfig(
+        enabled=enabled,
+        host=host,
+        port=port,
+        max_sample_points=max_sample_points,
+        parse_every_n_packets=parse_every_n_packets,
+    )
 
 
 def _parse_destinations(item: dict[str, Any], context: str) -> tuple[ForwardTarget, ...]:

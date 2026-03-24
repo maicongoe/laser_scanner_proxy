@@ -39,9 +39,19 @@ class GeneralConfig:
 
 
 @dataclass(frozen=True)
+class WebConfig:
+    enabled: bool
+    host: str
+    port: int
+    max_sample_points: int
+    parse_every_n_packets: int
+
+
+@dataclass(frozen=True)
 class AppConfig:
     general: GeneralConfig
     scanners: list[ScannerConfig]
+    web: WebConfig
 
     @property
     def enabled_scanners(self) -> list[ScannerConfig]:

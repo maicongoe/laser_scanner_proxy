@@ -6,8 +6,10 @@ import sys
 
 from config_loader import ConfigError, load_config
 from logger_setup import setup_logger
+from telemetry_store import TelemetryStore
 from udp_relay import UdpRelay
 from utils import apply_cpu_affinity, apply_nice
+from web_server import TelemetryWebServer
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -53,7 +55,16 @@ def main() -> int:
         logger.error("Falha ao aplicar afinidade/nice: %s", exc)
         return 3
 
-    relay = UdpRelay(config, logger)
+    telemetry_store = TelemetryStore([scanner.name for scanner in config.enabled_scanners])
+    telemetry_web_server = TelemetryWebServer(config.web, telemetry_store, logger)
+
+    try:
+        telemetry_web_server.start()
+    except Exception as exc:
+        logger.error("Falha ao iniciar servidor web de telemetria: %s", exc)
+        return 6
+
+    relay = UdpRelay(config, logger, telemetry_store=telemetry_store)
 
     def _signal_handler(signum: int, _frame: object) -> None:
         logger.info("Sinal recebido (%d). Encerrando de forma limpa...", signum)
@@ -73,6 +84,8 @@ def main() -> int:
     except Exception:
         logger.exception("Erro inesperado no relay.")
         return 5
+    finally:
+        telemetry_web_server.stop()
 
     return 0
 
