@@ -37,6 +37,7 @@ WEB_DEFAULTS: dict[str, Any] = {
     "port": 8080,
     "max_sample_points": 120,
     "parse_every_n_packets": 1,
+    "parse_mode": "full",
 }
 WEB_ALLOWED_KEYS = set(WEB_DEFAULTS.keys())
 
@@ -303,10 +304,13 @@ def _parse_web(raw: Any) -> WebConfig:
         merged["parse_every_n_packets"],
         "web.parse_every_n_packets",
     )
+    parse_mode = _ensure_str(merged["parse_mode"], "web.parse_mode").lower()
     if max_sample_points <= 0:
         raise ConfigError("web.max_sample_points deve ser > 0.")
     if parse_every_n_packets <= 0:
         raise ConfigError("web.parse_every_n_packets deve ser > 0.")
+    if parse_mode not in {"full", "minimal"}:
+        raise ConfigError("web.parse_mode deve ser 'full' ou 'minimal'.")
 
     return WebConfig(
         enabled=enabled,
@@ -314,6 +318,7 @@ def _parse_web(raw: Any) -> WebConfig:
         port=port,
         max_sample_points=max_sample_points,
         parse_every_n_packets=parse_every_n_packets,
+        parse_mode=parse_mode,
     )
 
 

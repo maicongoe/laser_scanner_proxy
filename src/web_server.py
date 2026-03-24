@@ -60,6 +60,7 @@ def _build_index_html() -> str:
         html += `<tr><td>sequence_number</td><td>${fmt(snap.sequence_number)}</td></tr>`;
         html += `<tr><td>number_of_beams</td><td>${fmt(snap.number_of_beams)}</td></tr>`;
         html += `<tr><td>valid_beams</td><td>${fmt(snap.valid_beams)}</td></tr>`;
+        html += `<tr><td>infinite_beams</td><td>${fmt(snap.infinite_beams)}</td></tr>`;
         html += `<tr><td>start_angle_deg</td><td>${fmt(snap.start_angle_deg)}</td></tr>`;
         html += `<tr><td>angular_beam_resolution_deg</td><td>${fmt(snap.angular_beam_resolution_deg)}</td></tr>`;
         html += `<tr><td>min_range_m / max_range_m</td><td>${fmt(snap.min_range_m)} / ${fmt(snap.max_range_m)}</td></tr>`;

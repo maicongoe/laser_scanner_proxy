@@ -16,8 +16,9 @@
     "enabled": true,
     "host": "0.0.0.0",
     "port": 8080,
-    "max_sample_points": 120,
-    "parse_every_n_packets": 3
+    "max_sample_points": 360,
+    "parse_every_n_packets": 1,
+    "parse_mode": "full"
   },
   "scanners": [
     {

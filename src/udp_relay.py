@@ -318,11 +318,13 @@ class UdpRelay:
             % self._config.web.parse_every_n_packets
             == 0
         )
+        full_parse = self._config.web.parse_mode == "full"
         try:
             snapshot = runtime.interpreter.feed_datagram(
                 payload,
                 now_monotonic,
                 parse_enabled=parse_enabled,
+                full_parse=full_parse,
             )
             if snapshot is not None:
                 self._telemetry_store.update_snapshot(scanner_name, snapshot)

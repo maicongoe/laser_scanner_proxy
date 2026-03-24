@@ -46,7 +46,14 @@ Implementacao baseada na estrutura de parsing dos repositorios oficiais da SICK:
 
 ## Dependencias
 
-Somente biblioteca padrao do Python 3.10+.
+- Python 3.10+
+- NumPy (para parse vetorizado com menor CPU)
+
+Instalacao:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
 
 ## Configuracao JSON
 
@@ -71,6 +78,7 @@ Somente biblioteca padrao do Python 3.10+.
 - `port`: ex. `8080`
 - `max_sample_points`: limita pontos enviados na API (reduz CPU/rede)
 - `parse_every_n_packets`: interpreta 1 a cada N pacotes (reduz CPU)
+- `parse_mode`: `full` (mais detalhado) ou `minimal` (menos CPU)
 
 ### Secao `scanners`
 
@@ -103,8 +111,9 @@ Cada scanner:
     "enabled": true,
     "host": "0.0.0.0",
     "port": 8080,
-    "max_sample_points": 120,
-    "parse_every_n_packets": 3
+    "max_sample_points": 360,
+    "parse_every_n_packets": 1,
+    "parse_mode": "full"
   },
   "scanners": [
     {
@@ -173,8 +182,10 @@ Por scanner (quando telegrama completo do nanoScan3 e parse valido):
 
 Se o uso de CPU subir com web habilitada:
 
-- aumente `web.parse_every_n_packets` (ex.: 3, 5, 10)
-- reduza `web.max_sample_points` (ex.: 60 ou 90)
+- mantenha NumPy instalado (sem ele cai para parser Python puro)
+- aumente `web.parse_every_n_packets` (ex.: 2, 3, 5)
+- reduza `web.max_sample_points` (ex.: 180, 90, 60)
+- use `web.parse_mode = \"minimal\"` para monitoramento leve
 
 ## Teste com simulador (somente relay)
 

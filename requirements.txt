@@ -1,2 +1,1 @@
-# Projeto usando apenas biblioteca padrão do Python 3.10+.
-# Nenhuma dependência externa é necessária.
+numpy>=1.24

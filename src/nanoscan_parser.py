@@ -5,6 +5,11 @@ import struct
 from dataclasses import dataclass
 from typing import Optional
 
+try:
+    import numpy as np
+except Exception:  # pragma: no cover
+    np = None
+
 
 _DATAGRAM_HEADER_SIZE = 24
 _DATA_HEADER_SIZE = 52
@@ -25,12 +30,12 @@ class NanoScanSnapshot:
     interbeam_period_us: int
     start_angle_deg: float
     angular_beam_resolution_deg: float
-    valid_beams: int
-    infinite_beams: int
-    glare_beams: int
-    reflector_beams: int
-    contamination_beams: int
-    contamination_warning_beams: int
+    valid_beams: Optional[int]
+    infinite_beams: Optional[int]
+    glare_beams: Optional[int]
+    reflector_beams: Optional[int]
+    contamination_beams: Optional[int]
+    contamination_warning_beams: Optional[int]
     min_range_m: Optional[float]
     max_range_m: Optional[float]
     sample_step: int
@@ -144,21 +149,23 @@ class NanoScanUdpInterpreter:
     def __init__(self, max_sample_points: int = 120) -> None:
         self._reassembler = _DatagramReassembler()
         self._max_sample_points = max(1, max_sample_points)
+        self._has_numpy = np is not None
 
     def feed_datagram(
         self,
         datagram: memoryview,
         now_monotonic: float,
         parse_enabled: bool = True,
+        full_parse: bool = True,
     ) -> Optional[NanoScanSnapshot]:
         payload = self._reassembler.add_fragment(datagram, now_monotonic)
         if payload is None:
             return None
         if not parse_enabled:
             return None
-        return self._parse_payload(payload)
+        return self._parse_payload(payload, full_parse=full_parse)
 
-    def _parse_payload(self, payload: bytes) -> Optional[NanoScanSnapshot]:
+    def _parse_payload(self, payload: bytes, full_parse: bool) -> Optional[NanoScanSnapshot]:
         if len(payload) < _DATA_HEADER_SIZE:
             return None
 
@@ -196,62 +203,29 @@ class NanoScanUdpInterpreter:
             return None
 
         sample_step = max(1, int(math.ceil(number_of_beams / self._max_sample_points)))
-        sample_angles_deg: list[float] = []
-        sample_ranges_m: list[Optional[float]] = []
-        sample_reflectivity: list[int] = []
 
-        valid_beams = 0
-        infinite_beams = 0
-        glare_beams = 0
-        reflector_beams = 0
-        contamination_beams = 0
-        contamination_warning_beams = 0
-
-        min_range_m: Optional[float] = None
-        max_range_m: Optional[float] = None
-
-        angle_deg = start_angle_deg
-        for index in range(number_of_beams):
-            base = measurement_offset + 4 + (index * 4)
-            distance_raw = struct.unpack_from("<H", payload, base + 0)[0]
-            reflectivity = payload[base + 2]
-            status = payload[base + 3]
-
-            valid = bool(status & (1 << 0))
-            infinite = bool(status & (1 << 1))
-            glare = bool(status & (1 << 2))
-            reflector = bool(status & (1 << 3))
-            contamination = bool(status & (1 << 4))
-            contamination_warning = bool(status & (1 << 5))
-
-            if valid:
-                valid_beams += 1
-            if infinite:
-                infinite_beams += 1
-            if glare:
-                glare_beams += 1
-            if reflector:
-                reflector_beams += 1
-            if contamination:
-                contamination_beams += 1
-            if contamination_warning:
-                contamination_warning_beams += 1
-
-            range_m: Optional[float]
-            if infinite:
-                range_m = None
-            else:
-                range_m = (distance_raw * multiplication_factor) * 0.001
-                if valid:
-                    min_range_m = range_m if min_range_m is None else min(min_range_m, range_m)
-                    max_range_m = range_m if max_range_m is None else max(max_range_m, range_m)
-
-            if index % sample_step == 0 or index == (number_of_beams - 1):
-                sample_angles_deg.append(angle_deg)
-                sample_ranges_m.append(range_m)
-                sample_reflectivity.append(reflectivity)
-
-            angle_deg += angular_resolution_deg
+        (
+            valid_beams,
+            infinite_beams,
+            glare_beams,
+            reflector_beams,
+            contamination_beams,
+            contamination_warning_beams,
+            min_range_m,
+            max_range_m,
+            sample_angles_deg,
+            sample_ranges_m,
+            sample_reflectivity,
+        ) = self._extract_measurement(
+            payload=payload,
+            measurement_offset=measurement_offset,
+            number_of_beams=number_of_beams,
+            multiplication_factor=multiplication_factor,
+            start_angle_deg=start_angle_deg,
+            angular_resolution_deg=angular_resolution_deg,
+            sample_step=sample_step,
+            full_parse=full_parse,
+        )
 
         return NanoScanSnapshot(
             sequence_number=sequence_number,
@@ -277,6 +251,244 @@ class NanoScanUdpInterpreter:
             sample_angles_deg=sample_angles_deg,
             sample_ranges_m=sample_ranges_m,
             sample_reflectivity=sample_reflectivity,
+        )
+
+    def _extract_measurement(
+        self,
+        payload: bytes,
+        measurement_offset: int,
+        number_of_beams: int,
+        multiplication_factor: int,
+        start_angle_deg: float,
+        angular_resolution_deg: float,
+        sample_step: int,
+        full_parse: bool,
+    ) -> tuple[
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[float],
+        Optional[float],
+        list[float],
+        list[Optional[float]],
+        list[int],
+    ]:
+        if self._has_numpy:
+            return self._extract_measurement_numpy(
+                payload=payload,
+                measurement_offset=measurement_offset,
+                number_of_beams=number_of_beams,
+                multiplication_factor=multiplication_factor,
+                start_angle_deg=start_angle_deg,
+                angular_resolution_deg=angular_resolution_deg,
+                sample_step=sample_step,
+                full_parse=full_parse,
+            )
+        return self._extract_measurement_python(
+            payload=payload,
+            measurement_offset=measurement_offset,
+            number_of_beams=number_of_beams,
+            multiplication_factor=multiplication_factor,
+            start_angle_deg=start_angle_deg,
+            angular_resolution_deg=angular_resolution_deg,
+            sample_step=sample_step,
+            full_parse=full_parse,
+        )
+
+    def _extract_measurement_numpy(
+        self,
+        payload: bytes,
+        measurement_offset: int,
+        number_of_beams: int,
+        multiplication_factor: int,
+        start_angle_deg: float,
+        angular_resolution_deg: float,
+        sample_step: int,
+        full_parse: bool,
+    ) -> tuple[
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[float],
+        Optional[float],
+        list[float],
+        list[Optional[float]],
+        list[int],
+    ]:
+        assert np is not None
+        beam_array = np.frombuffer(
+            payload,
+            dtype=np.dtype([("distance", "<u2"), ("reflectivity", "u1"), ("status", "u1")]),
+            count=number_of_beams,
+            offset=measurement_offset + 4,
+        )
+        status = beam_array["status"]
+        reflectivity = beam_array["reflectivity"]
+        distance_m = beam_array["distance"].astype(np.float32) * (multiplication_factor * 0.001)
+
+        infinite_mask = (status & 0x02) != 0
+
+        if full_parse:
+            valid_mask = (status & 0x01) != 0
+            glare_mask = (status & 0x04) != 0
+            reflector_mask = (status & 0x08) != 0
+            contamination_mask = (status & 0x10) != 0
+            contamination_warning_mask = (status & 0x20) != 0
+
+            valid_beams: Optional[int] = int(np.count_nonzero(valid_mask))
+            infinite_beams: Optional[int] = int(np.count_nonzero(infinite_mask))
+            glare_beams: Optional[int] = int(np.count_nonzero(glare_mask))
+            reflector_beams: Optional[int] = int(np.count_nonzero(reflector_mask))
+            contamination_beams: Optional[int] = int(np.count_nonzero(contamination_mask))
+            contamination_warning_beams: Optional[int] = int(
+                np.count_nonzero(contamination_warning_mask)
+            )
+
+            finite_valid_mask = valid_mask & (~infinite_mask)
+            if np.any(finite_valid_mask):
+                min_range_m: Optional[float] = float(distance_m[finite_valid_mask].min())
+                max_range_m: Optional[float] = float(distance_m[finite_valid_mask].max())
+            else:
+                min_range_m = None
+                max_range_m = None
+        else:
+            valid_beams = None
+            infinite_beams = None
+            glare_beams = None
+            reflector_beams = None
+            contamination_beams = None
+            contamination_warning_beams = None
+            finite_mask = ~infinite_mask
+            if np.any(finite_mask):
+                min_range_m = float(distance_m[finite_mask].min())
+                max_range_m = float(distance_m[finite_mask].max())
+            else:
+                min_range_m = None
+                max_range_m = None
+
+        sample_indices = np.arange(0, number_of_beams, sample_step, dtype=np.int32)
+        if sample_indices.size == 0:
+            sample_indices = np.array([0], dtype=np.int32)
+        if sample_indices[-1] != (number_of_beams - 1):
+            sample_indices = np.append(sample_indices, number_of_beams - 1)
+
+        sample_angles_np = start_angle_deg + (sample_indices.astype(np.float32) * angular_resolution_deg)
+        sampled_infinite = infinite_mask[sample_indices]
+        sampled_ranges = distance_m[sample_indices]
+        sample_reflect = reflectivity[sample_indices]
+
+        sample_angles_deg = sample_angles_np.astype(np.float32).tolist()
+        sample_ranges_m = [
+            None if bool(is_inf) else float(value)
+            for is_inf, value in zip(sampled_infinite.tolist(), sampled_ranges.tolist())
+        ]
+        sample_reflectivity = sample_reflect.astype(np.uint8).tolist()
+
+        return (
+            valid_beams,
+            infinite_beams,
+            glare_beams,
+            reflector_beams,
+            contamination_beams,
+            contamination_warning_beams,
+            min_range_m,
+            max_range_m,
+            sample_angles_deg,
+            sample_ranges_m,
+            sample_reflectivity,
+        )
+
+    def _extract_measurement_python(
+        self,
+        payload: bytes,
+        measurement_offset: int,
+        number_of_beams: int,
+        multiplication_factor: int,
+        start_angle_deg: float,
+        angular_resolution_deg: float,
+        sample_step: int,
+        full_parse: bool,
+    ) -> tuple[
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[int],
+        Optional[float],
+        Optional[float],
+        list[float],
+        list[Optional[float]],
+        list[int],
+    ]:
+        sample_angles_deg: list[float] = []
+        sample_ranges_m: list[Optional[float]] = []
+        sample_reflectivity: list[int] = []
+
+        valid_beams = 0 if full_parse else None
+        infinite_beams = 0 if full_parse else None
+        glare_beams = 0 if full_parse else None
+        reflector_beams = 0 if full_parse else None
+        contamination_beams = 0 if full_parse else None
+        contamination_warning_beams = 0 if full_parse else None
+        min_range_m: Optional[float] = None
+        max_range_m: Optional[float] = None
+
+        for index in range(number_of_beams):
+            base = measurement_offset + 4 + (index * 4)
+            distance_raw = struct.unpack_from("<H", payload, base + 0)[0]
+            reflectivity = payload[base + 2]
+            status = payload[base + 3]
+
+            valid = bool(status & (1 << 0))
+            infinite = bool(status & (1 << 1))
+            glare = bool(status & (1 << 2))
+            reflector = bool(status & (1 << 3))
+            contamination = bool(status & (1 << 4))
+            contamination_warning = bool(status & (1 << 5))
+
+            if full_parse:
+                if valid_beams is not None and valid:
+                    valid_beams += 1
+                if infinite_beams is not None and infinite:
+                    infinite_beams += 1
+                if glare_beams is not None and glare:
+                    glare_beams += 1
+                if reflector_beams is not None and reflector:
+                    reflector_beams += 1
+                if contamination_beams is not None and contamination:
+                    contamination_beams += 1
+                if contamination_warning_beams is not None and contamination_warning:
+                    contamination_warning_beams += 1
+
+            range_m: Optional[float] = None if infinite else (distance_raw * multiplication_factor) * 0.001
+            if range_m is not None and (full_parse is False or valid):
+                min_range_m = range_m if min_range_m is None else min(min_range_m, range_m)
+                max_range_m = range_m if max_range_m is None else max(max_range_m, range_m)
+
+            if index % sample_step == 0 or index == (number_of_beams - 1):
+                sample_angles_deg.append(start_angle_deg + (index * angular_resolution_deg))
+                sample_ranges_m.append(range_m)
+                sample_reflectivity.append(reflectivity)
+
+        return (
+            valid_beams,
+            infinite_beams,
+            glare_beams,
+            reflector_beams,
+            contamination_beams,
+            contamination_warning_beams,
+            min_range_m,
+            max_range_m,
+            sample_angles_deg,
+            sample_ranges_m,
+            sample_reflectivity,
         )
 
     @staticmethod

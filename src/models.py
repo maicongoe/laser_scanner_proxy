@@ -45,6 +45,7 @@ class WebConfig:
     port: int
     max_sample_points: int
     parse_every_n_packets: int
+    parse_mode: str
 
 
 @dataclass(frozen=True)
