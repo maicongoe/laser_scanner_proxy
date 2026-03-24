@@ -1,0 +1,24 @@
+# Arquivo de configuração:
+# /etc/amr-udp-relay/
+
+
+# iniciar App via Docker:
+docker start amr-udp-relay
+
+# parar:
+docker stop amr-udp-relay
+
+#  impedir que suba automático no próximo boot:
+docker update --restart=no amr-udp-relay
+
+# autostart no boot:
+docker update --restart=unless-stopped amr-udp-relay
+
+# remover totalmente o container
+docker rm amr-udp-relay
+
+# ver logs:
+docker logs -f amr-udp-relay
+
+# últimos 50 logs:
+docker logs --tail 50 amr-udp-relay

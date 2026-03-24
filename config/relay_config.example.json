@@ -7,7 +7,7 @@
     "send_socket_buffer_bytes": 262144,
     "max_expected_packet_size": 4096,
     "source_ip_filter_enabled": true,
-    "cpu_affinity": [2],
+    "cpu_affinity": null,
     "nice": 5,
     "scanner_timeout_sec": 2.0,
     "max_packets_per_socket_event": 128
@@ -16,17 +16,11 @@
     {
       "name": "scanner_frontal",
       "enabled": true,
-      "source_ip": "192.168.10.101",
-      "local_port": 21110,
+      "source_ip": "10.50.18.187",
+      "local_port": 12113,
       "destinations": [
-        {
-          "ip": "192.168.10.10",
-          "port": 21100
-        },
-        {
-          "ip": "192.168.20.50",
-          "port": 25000
-        }
+        { "ip": "10.50.18.181", "port": 2113 },
+        { "ip": "10.50.18.180", "port": 9999 }
       ]
     }
   ]
