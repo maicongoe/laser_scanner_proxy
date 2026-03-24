@@ -1,0 +1,21 @@
+[Unit]
+Description=UDP Relay/Fan-out para Laser Scanners Industriais
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amr
+Group=amr
+WorkingDirectory=/opt/udp-relay
+ExecStart=/usr/bin/python3 /opt/udp-relay/src/main.py --config /etc/udp-relay/relay_config.json
+Restart=always
+RestartSec=1
+KillSignal=SIGTERM
+TimeoutStopSec=5
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
