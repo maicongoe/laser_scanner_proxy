@@ -1,0 +1,11 @@
+services:
+  udp-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: udp-relay
+    network_mode: host
+    restart: unless-stopped
+    command: ["--config", "/config/relay_config.json"]
+    volumes:
+      - ./config/relay_config.json:/config/relay_config.json:ro

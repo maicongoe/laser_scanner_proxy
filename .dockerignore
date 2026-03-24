@@ -1,7 +1,13 @@
+.git
+.gitignore
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 .pytest_cache/
 .mypy_cache/
 .DS_Store
 Thumbs.db
-config/relay_config.json
+scripts/
+systemd/
+README.md
