@@ -1,0 +1,36 @@
+{
+  "general": {
+    "log_level": "INFO",
+    "debug": false,
+    "stats_interval_sec": 5.0,
+    "recv_socket_buffer_bytes": 1048576,
+    "send_socket_buffer_bytes": 262144,
+    "max_expected_packet_size": 4096,
+    "source_ip_filter_enabled": true,
+    "cpu_affinity": null,
+    "nice": 5,
+    "scanner_timeout_sec": 2.0,
+    "max_packets_per_socket_event": 128
+  },
+  "web": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8282,
+    "max_sample_points": 3000,
+    "parse_every_n_packets": 15,
+    "parse_mode": "full"
+  },
+  "scanners": [
+    {
+      "name": "scanner_frontal",
+      "enabled": true,
+      "source_ip": "10.50.18.187",
+      "invert_scan_direction": true,
+      "local_port": 12113,
+      "destinations": [
+        { "ip": "10.50.18.181", "port": 2113 },
+        { "ip": "10.50.18.180", "port": 9999 }
+      ]
+    }
+  ]
+}

@@ -157,15 +157,25 @@ class NanoScanUdpInterpreter:
         now_monotonic: float,
         parse_enabled: bool = True,
         full_parse: bool = True,
+        invert_scan_direction: bool = False,
     ) -> Optional[NanoScanSnapshot]:
         payload = self._reassembler.add_fragment(datagram, now_monotonic)
         if payload is None:
             return None
         if not parse_enabled:
             return None
-        return self._parse_payload(payload, full_parse=full_parse)
+        return self._parse_payload(
+            payload,
+            full_parse=full_parse,
+            invert_scan_direction=invert_scan_direction,
+        )
 
-    def _parse_payload(self, payload: bytes, full_parse: bool) -> Optional[NanoScanSnapshot]:
+    def _parse_payload(
+        self,
+        payload: bytes,
+        full_parse: bool,
+        invert_scan_direction: bool,
+    ) -> Optional[NanoScanSnapshot]:
         if len(payload) < _DATA_HEADER_SIZE:
             return None
 
@@ -226,6 +236,13 @@ class NanoScanUdpInterpreter:
             sample_step=sample_step,
             full_parse=full_parse,
         )
+        if invert_scan_direction:
+            sample_angles_deg = self._invert_sample_angles(
+                sample_angles_deg=sample_angles_deg,
+                start_angle_deg=start_angle_deg,
+                angular_resolution_deg=angular_resolution_deg,
+                number_of_beams=number_of_beams,
+            )
 
         return NanoScanSnapshot(
             sequence_number=sequence_number,
@@ -499,3 +516,16 @@ class NanoScanUdpInterpreter:
             return False
         end = offset + size
         return offset >= 0 and end <= payload_size
+
+    @staticmethod
+    def _invert_sample_angles(
+        sample_angles_deg: list[float],
+        start_angle_deg: float,
+        angular_resolution_deg: float,
+        number_of_beams: int,
+    ) -> list[float]:
+        if not sample_angles_deg:
+            return sample_angles_deg
+        scan_end_angle = start_angle_deg + ((number_of_beams - 1) * angular_resolution_deg)
+        axis = start_angle_deg + scan_end_angle
+        return [axis - angle for angle in sample_angles_deg]

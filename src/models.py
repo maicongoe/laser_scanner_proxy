@@ -21,6 +21,7 @@ class ScannerConfig:
     local_port: int
     destinations: tuple[ForwardTarget, ...]
     source_ip: Optional[str] = None
+    invert_scan_direction: bool = False
 
 
 @dataclass(frozen=True)

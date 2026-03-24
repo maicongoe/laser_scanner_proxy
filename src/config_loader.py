@@ -28,7 +28,13 @@ GENERAL_DEFAULTS: dict[str, Any] = {
 
 GENERAL_ALLOWED_KEYS = set(GENERAL_DEFAULTS.keys())
 SCANNER_REQUIRED_KEYS = {"name", "enabled", "local_port"}
-SCANNER_OPTIONAL_KEYS = {"source_ip", "destinations", "destination_ip", "destination_port"}
+SCANNER_OPTIONAL_KEYS = {
+    "source_ip",
+    "destinations",
+    "destination_ip",
+    "destination_port",
+    "invert_scan_direction",
+}
 SCANNER_ALLOWED_KEYS = SCANNER_REQUIRED_KEYS | SCANNER_OPTIONAL_KEYS
 
 WEB_DEFAULTS: dict[str, Any] = {
@@ -201,6 +207,10 @@ def _parse_scanners(raw: Any) -> list[ScannerConfig]:
             source_ip_text = _ensure_str(source_ip_raw, f"{context}.source_ip")
             if source_ip_text:
                 source_ip = validate_ipv4(source_ip_text, f"{context}.source_ip")
+        invert_scan_direction = _ensure_bool(
+            item.get("invert_scan_direction", False),
+            f"{context}.invert_scan_direction",
+        )
 
         scanners.append(
             ScannerConfig(
@@ -209,6 +219,7 @@ def _parse_scanners(raw: Any) -> list[ScannerConfig]:
                 source_ip=source_ip,
                 local_port=local_port,
                 destinations=destinations,
+                invert_scan_direction=invert_scan_direction,
             )
         )
 

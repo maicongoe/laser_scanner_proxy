@@ -87,6 +87,7 @@ Cada scanner:
 - `name`
 - `enabled`
 - `source_ip` (opcional)
+- `invert_scan_direction` (opcional, default `false`; use `true` para instalacao de ponta-cabeca)
 - `local_port`
 - `destinations`: lista de `{ "ip", "port" }`
 
@@ -120,6 +121,7 @@ Cada scanner:
       "name": "scanner_frontal",
       "enabled": true,
       "source_ip": "192.168.10.101",
+      "invert_scan_direction": false,
       "local_port": 21110,
       "destinations": [
         { "ip": "192.168.10.10", "port": 21100 },
@@ -152,6 +154,16 @@ Com `web.enabled=true`, o processo sobe HTTP com:
 - `GET /health` -> health check
 - `GET /api/scanners` -> estado de todos scanners
 - `GET /api/scanners/<nome>` -> estado de um scanner
+
+Visualizacao:
+
+- desenho polar dos raios no canvas
+- faixa angular fixa de fundo: `-47.5°` a `222.5°` (270°)
+- respeita `invert_scan_direction` por scanner para inverter o sentido dos raios
+- zoom por scanner com scroll do mouse
+- zoom maximo de `200x`
+- arraste com mouse para mover o centro do scanner (pan)
+- duplo clique no canvas para resetar zoom
 
 Exemplo:
 

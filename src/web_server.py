@@ -27,6 +27,8 @@ def _build_index_html() -> str:
     th { background: #f3f4f6; }
     .ok { color: #047857; font-weight: bold; }
     .err { color: #b91c1c; font-weight: bold; }
+    .canvas-wrap { margin-top: 10px; background: #0f172a; border-radius: 8px; padding: 8px; }
+    canvas { width: 100%; max-width: 760px; height: 380px; display: block; border: 1px solid #334155; border-radius: 6px; background: #020617; }
   </style>
 </head>
 <body>
@@ -34,8 +36,187 @@ def _build_index_html() -> str:
   <div class="muted">Atualizacao automatica a cada 1 segundo.</div>
   <div id="content"></div>
   <script>
+    const FOV_START_DEG = -47.5;
+    const FOV_END_DEG = 222.5;
+    const FOV_CENTER_DEG = (FOV_START_DEG + FOV_END_DEG) / 2.0;
+    const zoomByScanner = {};
+    const panByScanner = {};
+    const dragByScanner = {};
+
     function fmt(v) { return (v === null || v === undefined) ? "-" : v; }
     function statusClass(errors) { return errors > 0 ? "err" : "ok"; }
+    function scannerCanvasId(name) {
+      return "scan_canvas_" + String(name).replace(/[^a-zA-Z0-9_]/g, "_");
+    }
+    function normalizeAroundCenter(angleDeg) {
+      let a = angleDeg;
+      while ((a - FOV_CENTER_DEG) > 180.0) a -= 360.0;
+      while ((a - FOV_CENTER_DEG) < -180.0) a += 360.0;
+      return a;
+    }
+    function isInFov(angleDeg) {
+      const a = normalizeAroundCenter(angleDeg);
+      return a >= FOV_START_DEG && a <= FOV_END_DEG;
+    }
+    function finiteRanges(values) {
+      const out = [];
+      for (const v of values || []) {
+        if (v !== null && v !== undefined && Number.isFinite(v) && v > 0) {
+          out.push(v);
+        }
+      }
+      return out;
+    }
+    function drawBackground(ctx, cx, cy, radiusPx) {
+      const startRad = (FOV_START_DEG * Math.PI) / 180.0;
+      const endRad = (FOV_END_DEG * Math.PI) / 180.0;
+
+      ctx.strokeStyle = "#1e293b";
+      ctx.lineWidth = 1;
+
+      for (let i = 1; i <= 4; i++) {
+        const r = (radiusPx * i) / 4;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, -endRad, -startRad, false);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + radiusPx * Math.cos(startRad), cy - radiusPx * Math.sin(startRad));
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + radiusPx * Math.cos(endRad), cy - radiusPx * Math.sin(endRad));
+      ctx.stroke();
+    }
+    function drawScan(canvas, scannerName, snap) {
+      if (!canvas || !snap) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth || 760;
+      const cssH = canvas.clientHeight || 380;
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      ctx.clearRect(0, 0, cssW, cssH);
+      ctx.fillStyle = "#020617";
+      ctx.fillRect(0, 0, cssW, cssH);
+
+      const pan = panByScanner[scannerName] || { x: 0, y: 0 };
+      const cx = (cssW * 0.5) + pan.x;
+      const cy = (cssH * 0.72) + pan.y;
+      const radiusPx = Math.min(cssW * 0.46, cssH * 0.80);
+      const zoom = zoomByScanner[scannerName] || 1.0;
+
+      const ranges = finiteRanges(snap.sample_ranges_m);
+      const maxData = ranges.length > 0 ? Math.max(...ranges) : 1.0;
+      const maxRange = Math.max(0.5, maxData * 1.05);
+      const scale = (radiusPx / maxRange) * zoom;
+
+      drawBackground(ctx, cx, cy, radiusPx);
+
+      const angles = snap.sample_angles_deg || [];
+      const sampleRanges = snap.sample_ranges_m || [];
+      const points = [];
+      const rayStride = angles.length > 700 ? 4 : 1;
+
+      ctx.strokeStyle = "#0ea5e9";
+      ctx.lineWidth = 0.7;
+      for (let i = 0; i < angles.length; i++) {
+        const angleDeg = angles[i];
+        if (!isInFov(angleDeg)) continue;
+        const range = sampleRanges[i];
+        if (range === null || range === undefined || !Number.isFinite(range) || range <= 0) {
+          continue;
+        }
+        const rad = (angleDeg * Math.PI) / 180.0;
+        const x = cx + (range * scale) * Math.cos(rad);
+        const y = cy - (range * scale) * Math.sin(rad);
+        points.push([x, y]);
+        if (i % rayStride === 0) {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+      }
+
+      if (points.length > 1) {
+        ctx.strokeStyle = "#22d3ee";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(points[0][0], points[0][1]);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i][0], points[i][1]);
+        }
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = "#f59e0b";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, 2 * Math.PI);
+      ctx.fill();
+
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "12px Arial";
+      ctx.fillText(`maxRange=${maxRange.toFixed(2)}m`, 10, 18);
+      ctx.fillText(`pontos=${angles.length}`, 10, 34);
+      ctx.fillText(`zoom=${zoom.toFixed(2)}x`, 10, 50);
+      ctx.fillText(`fov=${FOV_START_DEG}°..${FOV_END_DEG}°`, 10, 66);
+      ctx.fillText(`pan=(${pan.x.toFixed(0)}, ${pan.y.toFixed(0)})`, 10, 82);
+    }
+    function attachInteractions(canvas, scannerName) {
+      if (!canvas) return;
+      if (zoomByScanner[scannerName] === undefined) {
+        zoomByScanner[scannerName] = 1.0;
+      }
+      if (panByScanner[scannerName] === undefined) {
+        panByScanner[scannerName] = { x: 0, y: 0 };
+      }
+      if (canvas.dataset.interactionsAttached === "1") {
+        return;
+      }
+      canvas.dataset.interactionsAttached = "1";
+
+      canvas.addEventListener("wheel", (ev) => {
+        ev.preventDefault();
+        const current = zoomByScanner[scannerName] || 1.0;
+        const next = ev.deltaY < 0 ? current * 1.15 : current / 1.15;
+        zoomByScanner[scannerName] = Math.min(200.0, Math.max(0.10, next));
+      }, { passive: false });
+      canvas.addEventListener("dblclick", () => {
+        zoomByScanner[scannerName] = 1.0;
+        panByScanner[scannerName] = { x: 0, y: 0 };
+      });
+
+      canvas.addEventListener("mousedown", (ev) => {
+        dragByScanner[scannerName] = {
+          active: true,
+          startX: ev.clientX,
+          startY: ev.clientY,
+          panX: panByScanner[scannerName].x,
+          panY: panByScanner[scannerName].y,
+        };
+      });
+      canvas.addEventListener("mousemove", (ev) => {
+        const drag = dragByScanner[scannerName];
+        if (!drag || !drag.active) return;
+        const dx = ev.clientX - drag.startX;
+        const dy = ev.clientY - drag.startY;
+        panByScanner[scannerName] = { x: drag.panX + dx, y: drag.panY + dy };
+      });
+      const endDrag = () => {
+        const drag = dragByScanner[scannerName];
+        if (!drag) return;
+        drag.active = false;
+      };
+      canvas.addEventListener("mouseup", endDrag);
+      canvas.addEventListener("mouseleave", endDrag);
+    }
     function render(data) {
       const root = document.getElementById("content");
       const scanners = data.scanners || [];
@@ -46,6 +227,7 @@ def _build_index_html() -> str:
       let html = "";
       for (const item of scanners) {
         const snap = item.snapshot;
+        const canvasId = scannerCanvasId(item.scanner_name);
         html += "<div class='card'>";
         html += `<div><strong>${item.scanner_name}</strong> `;
         html += `<span class='${statusClass(item.parse_errors)}'>parse_errors=${item.parse_errors}</span></div>`;
@@ -65,9 +247,19 @@ def _build_index_html() -> str:
         html += `<tr><td>angular_beam_resolution_deg</td><td>${fmt(snap.angular_beam_resolution_deg)}</td></tr>`;
         html += `<tr><td>min_range_m / max_range_m</td><td>${fmt(snap.min_range_m)} / ${fmt(snap.max_range_m)}</td></tr>`;
         html += `<tr><td>sample_points</td><td>${(snap.sample_angles_deg || []).length}</td></tr>`;
-        html += "</table></div>";
+        html += "</table>";
+        html += `<div class='canvas-wrap'><canvas id='${canvasId}'></canvas></div>`;
+        html += "</div>";
       }
       root.innerHTML = html;
+      for (const item of scanners) {
+        const snap = item.snapshot;
+        if (!snap) continue;
+        const scannerName = item.scanner_name;
+        const canvas = document.getElementById(scannerCanvasId(scannerName));
+        attachInteractions(canvas, scannerName);
+        drawScan(canvas, scannerName, snap);
+      }
     }
     async function tick() {
       try {

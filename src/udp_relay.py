@@ -325,6 +325,7 @@ class UdpRelay:
                 now_monotonic,
                 parse_enabled=parse_enabled,
                 full_parse=full_parse,
+                invert_scan_direction=runtime.config.invert_scan_direction,
             )
             if snapshot is not None:
                 self._telemetry_store.update_snapshot(scanner_name, snapshot)
